@@ -1,206 +1,194 @@
 import streamlit as st
 import pandas as pd
-import boto3
-import json
-from datetime import datetime, timedelta
-from io import BytesIO 
+import numpy as np
+from datetime import datetime
 
-# =========================================================================
-# 1. STREAMLIT PAGE CONFIGURATION (MUST BE THE VERY FIRST ST COMMAND)
-# =========================================================================
+# ========== PAGE CONFIG ==========
 st.set_page_config(
-    page_title="Bedrock Contract Expiration Analyzer",
-    layout="wide"
+    page_title="Proactive CRM Expiration Agent",
+    layout="wide",
+    page_icon="🚀"
 )
 
-# --- Configuration Constants ---
-# NOTE: App Runner will handle credentialing, but region must be set.
-AWS_REGION = 'us-east-1' 
-BEDROCK_MODEL_ID = 'anthropic.claude-3-sonnet-20240229-v1:0' 
-ALERT_DAYS_THRESHOLD = 90 
-
-# --- Column Name Mapping (Must match your Excel file exactly) ---
-# 'Warranty Expiry' is mapped to 'expiry_date' for the primary LLM filter.
-COLUMN_MAPPING = {
-    'Customer Name': 'company',         
-    'Product': 'name',                  
-    'Warranty Expiry': 'expiry_date',   
-    'Maintenance Expiry': 'service_expiry_date', 
+# ========== CUSTOM STYLES ==========
+st.markdown("""
+<style>
+/* Global Page */
+html, body, [class*="css"] {
+    background-color: #f7f9fc !important;
+    font-family: 'Inter', sans-serif !important;
 }
 
-# =========================================================================
-# 2. CORE BACKEND FUNCTIONS
-# =========================================================================
-
-@st.cache_resource
-def get_bedrock_client(region):
-    """Initializes and returns the Bedrock client. 
-    
-    In App Runner, this automatically assumes the IAM Role attached to the service.
-    """
-    try:
-        # Boto3 detects the App Runner IAM Role credentials automatically
-        return boto3.client(service_name='bedrock-runtime', region_name=region)
-    except Exception as e:
-        # If this fails, the IAM Role lacks Bedrock permissions.
-        st.error(f"Failed to initialize AWS Bedrock Client. Please ensure the App Runner IAM Role has the 'bedrock:InvokeModel' permission. Error: {e}")
-        st.stop()
-        
-bedrock_client = get_bedrock_client(AWS_REGION)
+/* Center the upload card container */
+.upload-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+}
 
 
-def read_uploaded_file(uploaded_file):
-    """Reads the Streamlit UploadedFile object into a Pandas DataFrame."""
-    try:
-        bytes_data = uploaded_file.getvalue()
-        df = pd.read_excel(BytesIO(bytes_data), sheet_name=0)
-        
-        # 1. Validate and Rename Columns
-        required_cols = list(COLUMN_MAPPING.keys())
-        if not all(col in df.columns for col in required_cols):
-            missing = [col for col in required_cols if col not in df.columns]
-            st.error(f"File validation failed. Missing required columns: **{', '.join(missing)}**.")
-            st.info(f"Your Excel file must contain these exact column headers: **{', '.join(required_cols)}**.")
+
+/* Gradient Title */
+.main-title {
+    font-size: 2.5rem;
+    font-weight: 800;
+    text-align: center;
+    background: linear-gradient(90deg, #007bff 0%, #00d4ff 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 0.2em;
+}
+
+/* Subtitle */
+.subheader {
+    text-align: center;
+    color: #555;
+    font-size: 1.1rem;
+    margin-bottom: 2rem;
+}
+
+/* Sidebar Styling */
+[data-testid="stSidebar"] {
+    background-color: #111 !important;
+    color: white !important;
+}
+[data-testid="stSidebar"] * {
+    color: white !important;
+}
+
+/* Buttons */
+.stDownloadButton button, .stButton button {
+    background: linear-gradient(90deg, #007bff, #00c6ff);
+    color: white !important;
+    font-weight: 600;
+    border-radius: 10px;
+    padding: 0.6rem 1.4rem;
+    border: none;
+    transition: all 0.2s ease-in-out;
+}
+.stDownloadButton button:hover, .stButton button:hover {
+    transform: scale(1.05);
+}
+
+/* Data Table */
+[data-testid="stDataFrame"] {
+    border-radius: 12px;
+    overflow: hidden;
+    background: white;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+/* Footer */
+.footer {
+    text-align: center;
+    color: gray;
+    font-size: 0.9rem;
+    margin-top: 2rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ========== HEADER ==========
+st.markdown('<h1 class="main-title">🚀 Proactive CRM Expiration Agent</h1>', unsafe_allow_html=True)
+st.markdown('<p class="subheader">Automatically identify upcoming contract expirations — act before they expire.</p>', unsafe_allow_html=True)
+
+# ========== UPLOAD SECTION ==========
+st.markdown('<div class="upload-container"><div class="upload-card">', unsafe_allow_html=True)
+
+st.markdown("### 📤 Upload Your Excel or CSV File")
+st.write("Ensure your file contains the columns: **Customer Name**, **Product**, **Warranty Expiry**, and **Maintenance Expiry**")
+
+uploaded_file = st.file_uploader("Upload Excel/CSV file", type=["xlsx", "xls", "csv"])
+
+st.markdown('</div></div>', unsafe_allow_html=True)
+
+# ========== CORE FUNCTIONS ==========
+def excel_date_to_datetime(x):
+    if pd.isna(x):
+        return None
+    if isinstance(x, (int, float, np.number)):
+        try:
+            return pd.to_datetime('1899-12-30') + pd.to_timedelta(int(x), unit='D')
+        except Exception:
             return None
-
-        df.rename(columns=COLUMN_MAPPING, inplace=True)
-        
-        # 2. Format Date Columns
-        date_cols = ['expiry_date', 'service_expiry_date']
-        for col in date_cols:
-            df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%Y-%m-%d')
-        
-        return df
-    
-    except Exception as e:
-        st.error(f"Error reading or processing the file: {e}")
+    try:
+        return pd.to_datetime(x, errors='coerce')
+    except:
         return None
 
+def normalize_dates(df, col):
+    if col not in df.columns:
+        return df
+    df[col + "_dt"] = df[col].apply(excel_date_to_datetime)
+    return df
 
-def generate_llm_prompt(contract_data_json):
-    """Creates a structured prompt for the LLM."""
-    
-    today = datetime.now().strftime('%Y-%m-%d')
-    alert_end_date = (datetime.now() + timedelta(days=ALERT_DAYS_THRESHOLD)).strftime('%Y-%m-%d')
-    
-    system_prompt = f"""
-    You are an expert Contract Analyst. Your task is to analyze the provided list of contracts in JSON format.
-    The primary date for analysis is 'expiry_date' (Warranty Expiry).
-    
-    Identify all contracts where the **'expiry_date'** is between today ({today}) and {alert_end_date} (within {ALERT_DAYS_THRESHOLD} days).
-
-    For each expiring contract found based on the 'expiry_date', extract and return the exact 'name', 'company', 'expiry_date', and the **'service_expiry_date'**. 
-    
-    Your final output MUST be a clean JSON array of objects, with NO surrounding text, explanation, or markdown formatting (e.g., no ```json).
-    The required JSON schema is:
-    [
-        {{"name": "...", "company": "...", "expiry_date": "YYYY-MM-DD", "service_expiry_date": "YYYY-MM-DD"}},
-        ...
-    ]
-    If no contracts are expiring in the window, return an empty array: [].
-    """
-    user_message = f"Analyze the following contract data (JSON):\n\n{contract_data_json}"
-    return system_prompt, user_message
-
-
-def analyze_contracts_with_bedrock(df, client):
-    """Sends data to Bedrock and parses the structured response."""
-    if df.empty:
-        return []
-
-    contract_data_json = df.to_json(orient='records', date_format='iso')
-    system_prompt, user_message = generate_llm_prompt(contract_data_json)
-    
-    llm_output_text = "ERROR: Bedrock call failed before output could be received."
-
-    try:
-        response = client.converse(
-            modelId=BEDROCK_MODEL_ID,
-            messages=[
-                {"role": "user", "content": [{"text": user_message}]}
-            ],
-            system=[{"text": system_prompt}],
-            inferenceConfig={"temperature": 0.0, "maxTokens": 4096}
-        )
-        
-        llm_output_text = response['output']['message']['content'][0]['text']
-        
-        # Robust cleanup for LLM markdown formatting
-        llm_output_text = llm_output_text.strip()
-        if llm_output_text.startswith("```"):
-            start = llm_output_text.find('[')
-            end = llm_output_text.rfind(']')
-            if start != -1 and end != -1:
-                llm_output_text = llm_output_text[start:end+1]
-            else: 
-                llm_output_text = llm_output_text.replace("```json", "").replace("```", "")
-        
-        return json.loads(llm_output_text)
-        
-    except Exception as e:
-        st.error(f"LLM Processing Error: Could not get or parse response from Bedrock. Details: {e}")
-        st.code(f"LLM Raw Output (Debug):\n{llm_output_text}", language="json")
-        return []
-
-
-# =========================================================================
-# 3. STREAMLIT UI CONTENT
-# =========================================================================
-
-st.title("🧠 LLM-Powered Warranty & Maintenance Tracker")
-st.markdown("Upload your asset ledger to automatically identify items where **Warranty Expiry** is approaching within the next **{}** days using Amazon Bedrock.".format(ALERT_DAYS_THRESHOLD))
-
-st.divider()
-
-# --- File Uploader and Process Button ---
-uploaded_file = st.file_uploader(
-    "Upload Excel Asset File (.xlsx)",
-    type=['xlsx'],
-    help="The file must contain columns: 'Customer Name', 'Product', 'Warranty Expiry', and 'Maintenance Expiry'."
-)
-
+# ========== PROCESSING ==========
 if uploaded_file is not None:
-    st.success(f"File **{uploaded_file.name}** uploaded successfully.")
-    
-    raw_df = read_uploaded_file(uploaded_file)
+    try:
+        if uploaded_file.name.endswith(".csv"):
+            df = pd.read_csv(uploaded_file)
+        else:
+            df = pd.read_excel(uploaded_file, engine="openpyxl")
+    except Exception as e:
+        st.error(f"❌ Could not read file: {e}")
+        st.stop()
 
-    if raw_df is not None:
-        st.subheader("1. Preview of Uploaded Data")
-        st.dataframe(raw_df.rename(columns={'expiry_date': 'Warranty Expiry (Primary)', 'service_expiry_date': 'Maintenance Expiry'}), use_container_width=True)
+    df.columns = df.columns.str.strip()
+    st.markdown("### ✅ File Uploaded Successfully!")
+    st.success(f"Detected {len(df)} rows. Processing...")
 
-        if st.button("🚀 Analyze Assets with Amazon Bedrock", type="primary"):
-            with st.spinner("Analyzing data with Bedrock... This may take a moment."):
-                expiring_contracts = analyze_contracts_with_bedrock(raw_df, bedrock_client)
-            
-            st.divider()
-            st.subheader("2. Expiring Assets Found (Based on Warranty Expiry)")
+    df = normalize_dates(df, "Warranty Expiry")
+    df = normalize_dates(df, "Maintenance Expiry")
 
-            if expiring_contracts:
-                results_df = pd.DataFrame(expiring_contracts)
-                
-                # Rename the output columns for display
-                results_df.rename(
-                    columns={'company': 'Customer Name', 'name': 'Product', 
-                             'expiry_date': 'Warranty Expiry', 
-                             'service_expiry_date': 'Maintenance Expiry'}, 
-                    inplace=True
-                )
-                
-                # Highlight the Warranty Expiry column
-                def highlight_expiry(s):
-                    return ['background-color: #ffcccc' if col == 'Warranty Expiry' else '' for col in s.index]
-                    
-                st.dataframe(
-                    results_df.style.apply(highlight_expiry, axis=0), 
-                    use_container_width=True,
-                    height=300
-                )
-                
-                st.balloons()
-                st.success(f"**Success!** {len(expiring_contracts)} asset(s) have an approaching **Warranty Expiry** date.")
+    now = pd.to_datetime(datetime.utcnow())
+    rows = []
 
-            else:
-                st.info("🎉 No assets are set to expire within the **{}** day threshold. All clear!".format(ALERT_DAYS_THRESHOLD))
-                
-# --- Footer ---
-st.caption(" Credits to ALPHA GENES")
+    for _, r in df.iterrows():
+        base = {"Customer Name": r.get("Customer Name", ""), "Product": r.get("Product", "")}
+        for tcol, tname in [("Warranty Expiry_dt", "Warranty"), ("Maintenance Expiry_dt", "Maintenance")]:
+            d = r.get(tcol)
+            if pd.notna(d):
+                days_left = (d - now).days
+                rows.append({**base, "Expiry Type": tname, "Expiry Date": d.date(), "Days Left": days_left})
+
+    if not rows:
+        st.warning("⚠️ No valid expiry dates found.")
+        st.stop()
+
+    out = pd.DataFrame(rows)
+    proactive_window = st.sidebar.number_input("🕒 Proactive window (days)", 30, 365, 90)
+    out = out[(out["Days Left"] >= 0) & (out["Days Left"] <= proactive_window)].copy()
+    out = out.sort_values(["Days Left", "Customer Name"])
+
+    # Sidebar filters
+    st.sidebar.header("🔍 Filters")
+    customers = ["All"] + sorted(out["Customer Name"].unique().tolist())
+    products = ["All"] + sorted(out["Product"].unique().tolist())
+    expiry_types = out["Expiry Type"].unique().tolist()
+
+    selected_customer = st.sidebar.selectbox("Customer", customers)
+    selected_product = st.sidebar.selectbox("Product", products)
+    selected_types = st.sidebar.multiselect("Expiry Type", expiry_types, default=expiry_types)
+
+    filtered = out.copy()
+    if selected_customer != "All":
+        filtered = filtered[filtered["Customer Name"] == selected_customer]
+    if selected_product != "All":
+        filtered = filtered[filtered["Product"] == selected_product]
+    if selected_types:
+        filtered = filtered[filtered["Expiry Type"].isin(selected_types)]
+
+    st.markdown("### 📋 Expiration Report")
+    st.write(f"Showing {len(filtered)} items expiring within {proactive_window} days.")
+    st.dataframe(filtered.reset_index(drop=True), height=450)
+
+    # Download button
+    csv = filtered.to_csv(index=False).encode('utf-8')
+    st.download_button("⬇️ Download Filtered Report", csv, "CRM_Expirations.csv", "text/csv")
+
+else:
+    st.info("👆 Upload your Excel or CSV file to start processing.")
+
+# ========== FOOTER ==========
+st.markdown('<div class="footer">Built with ❤️ by <b>Thaslim Thoufica</b></div>', unsafe_allow_html=True)
