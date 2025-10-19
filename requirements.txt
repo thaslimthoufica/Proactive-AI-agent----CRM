@@ -1,4 +1,5 @@
-openai 
-python-dotenv 
-faster-whisper 
-rich 
+streamlit
+pandas
+openpyxl  # Required by pandas for .xlsx files
+boto3 
+
